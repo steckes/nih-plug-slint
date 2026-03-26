@@ -7,7 +7,7 @@ use nih_plug::prelude::{Editor, GuiContext, ParamSetter};
 use once_cell::unsync::OnceCell;
 use slint::platform::femtovg_renderer::FemtoVGRenderer;
 use slint::platform::WindowAdapter;
-use slint::{LogicalPosition, PhysicalSize};
+use slint::{LogicalPosition, PhysicalSize, SharedString};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -580,10 +580,53 @@ impl<T: slint::ComponentHandle> baseview::WindowHandler for WindowHandler<T> {
                 self.adapter.window.dispatch_event(slint_event);
                 EventStatus::Captured
             }
-            Event::Keyboard(_key_event) => {
-                // TODO: Implement keyboard event forwarding
-                // This requires mapping baseview's keyboard types to Slint's
-                EventStatus::Ignored
+            Event::Keyboard(key_event) => {
+                let text: SharedString = if let keyboard_types::Key::Character(char) = key_event.key
+                {
+                    char.into()
+                } else {
+                    match key_event.code {
+                        keyboard_types::Code::Enter => slint::platform::Key::Return.into(),
+                        keyboard_types::Code::Tab => slint::platform::Key::Tab.into(),
+                        keyboard_types::Code::Space => slint::platform::Key::Space.into(),
+                        keyboard_types::Code::Backspace => slint::platform::Key::Backspace.into(),
+                        keyboard_types::Code::Escape => slint::platform::Key::Escape.into(),
+                        keyboard_types::Code::ArrowUp => slint::platform::Key::UpArrow.into(),
+                        keyboard_types::Code::ArrowDown => slint::platform::Key::DownArrow.into(),
+                        keyboard_types::Code::ArrowLeft => slint::platform::Key::LeftArrow.into(),
+                        keyboard_types::Code::ArrowRight => slint::platform::Key::RightArrow.into(),
+                        keyboard_types::Code::ShiftLeft => slint::platform::Key::Shift.into(),
+                        keyboard_types::Code::ShiftRight => slint::platform::Key::ShiftR.into(),
+                        keyboard_types::Code::ControlLeft => slint::platform::Key::Control.into(),
+                        keyboard_types::Code::ControlRight => slint::platform::Key::ControlR.into(),
+                        keyboard_types::Code::AltLeft => slint::platform::Key::Alt.into(),
+                        keyboard_types::Code::AltRight => slint::platform::Key::AltGr.into(),
+                        keyboard_types::Code::MetaLeft => slint::platform::Key::Meta.into(),
+                        keyboard_types::Code::MetaRight => slint::platform::Key::MetaR.into(),
+                        _ => "".into(),
+                    }
+                };
+
+                match key_event.state {
+                    keyboard_types::KeyState::Down => {
+                        if key_event.repeat {
+                            self.adapter
+                                .window
+                                .dispatch_event(WindowEvent::KeyPressRepeated { text });
+                        } else {
+                            self.adapter
+                                .window
+                                .dispatch_event(WindowEvent::KeyPressed { text });
+                        }
+                    }
+                    keyboard_types::KeyState::Up => {
+                        self.adapter
+                            .window
+                            .dispatch_event(WindowEvent::KeyReleased { text });
+                    }
+                }
+
+                EventStatus::Captured
             }
             Event::Window(window_event) => {
                 match window_event {
