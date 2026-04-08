@@ -306,7 +306,7 @@ pub struct WindowHandler<T: slint::ComponentHandle> {
     event_loop_handler: Arc<EventLoopHandler<T>>,
     setup_handler: Arc<SetupHandler<T>>,
     scale_factor: RefCell<f32>,
-    state: Arc<SlintEditorState>,
+    pub state: Arc<SlintEditorState>,
     // Rc so it can be shared with Slint callbacks without needing &mut self
     pending_resizes: Rc<RefCell<Vec<(u32, u32)>>>,
     last_cursor_pos: RefCell<LogicalPosition>,
