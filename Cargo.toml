@@ -1,7 +1,7 @@
 [package]
 name = "nih_plug_slint"
 version = "0.1.1"
-edition = "2021"
+edition = "2024"
 license = "ISC"
 description = "An adapter to use Slint GUIs with NIH-plug"
 keywords = ["audio", "plugin", "vst3", "clap", "slint"]
@@ -9,7 +9,7 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
-baseview = { git = "https://github.com/RustAudio/baseview.git", features = ["opengl"] }
+baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "fd3c9dcf806cd38c83dfa94e70005c547af8764c", features = ["opengl"] }
 slint = { version = "=1.15.1", default-features = false, features = ["std", "renderer-femtovg", "raw-window-handle-06", "compat-1-2"] }
 i-slint-renderer-femtovg = { version = "=1.15.1", features = ["opengl"] }
 raw-window-handle = "0.6"
