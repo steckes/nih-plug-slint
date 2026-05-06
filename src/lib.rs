@@ -103,6 +103,13 @@ pub struct SlintEditor<T: slint::ComponentHandle> {
     state: Arc<SlintEditorState>,
     event_loop_handler: Arc<EventLoopHandler<T>>,
     setup_handler: Arc<SetupHandler<T>>,
+    /// Scale factor reported by the host via `Editor::set_scale_factor`.
+    /// Stored so that `spawn` can construct the Slint adapter at the
+    /// correct scale from the very first frame, instead of waiting for
+    /// baseview's `WindowEvent::Resized` to retroactively fix it (which
+    /// arrives after `component.show()` and doesn't always trigger a
+    /// relayout in Slint 1.15).
+    host_scale_factor: Arc<AtomicCell<f32>>,
 }
 
 impl<T: slint::ComponentHandle + 'static> SlintEditor<T> {
@@ -116,6 +123,7 @@ impl<T: slint::ComponentHandle + 'static> SlintEditor<T> {
             state,
             event_loop_handler: Arc::new(|_, _, _| {}),
             setup_handler: Arc::new(|_, _| {}),
+            host_scale_factor: Arc::new(AtomicCell::new(1.0)),
         }
     }
 
@@ -349,7 +357,17 @@ impl<T: slint::ComponentHandle> WindowHandler<T> {
             .size
             .store((logical_size.width as u32, logical_size.height as u32));
 
-        // Notify Slint of the new size (logical)
+        // Set the scale factor BEFORE dispatching Resized: Slint converts the
+        // LogicalSize in Resized into physical pixels using its current internal
+        // scale_factor. If we send Resized first while Slint still thinks the
+        // scale is 1.0, it lays out a 300x360 image into the upper-left of the
+        // 600x720 physical buffer — leaving the rest empty on HiDPI.
+        self.adapter
+            .window
+            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+                scale_factor: scale,
+            });
+
         self.adapter
             .window
             .dispatch_event(slint::platform::WindowEvent::Resized {
@@ -357,13 +375,6 @@ impl<T: slint::ComponentHandle> WindowHandler<T> {
                     logical_size.width as f32,
                     logical_size.height as f32,
                 ),
-            });
-
-        // Also set the scale factor on the Slint window
-        self.adapter
-            .window
-            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
-                scale_factor: scale,
             });
     }
 
@@ -665,6 +676,7 @@ impl<T: slint::ComponentHandle + 'static> Editor for SlintEditor<T> {
         let event_loop_handler = self.event_loop_handler.clone();
         let setup_handler = self.setup_handler.clone();
         let component_factory = self.component_factory.clone();
+        let host_scale_factor = self.host_scale_factor.clone();
 
         let window_handle =
             baseview::Window::open_parented(&parent, options, move |baseview_window| {
@@ -672,11 +684,15 @@ impl<T: slint::ComponentHandle + 'static> Editor for SlintEditor<T> {
                 // initialization (Slint may call renderer() eagerly) has a valid context.
                 unsafe { baseview_window.gl_context().unwrap().make_current() };
 
-                // Create the Slint window adapter.
-                // Start with scale 1.0; the actual system scale arrives via the first
-                // WindowEvent::Resized from baseview.
-                let initial_scale = 1.0f32;
-                let adapter = BaseviewSlintAdapter::new(width, height, initial_scale);
+                // Use the host-supplied scale factor (set via Editor::set_scale_factor)
+                // so Slint starts in the correct state. If the host never called it,
+                // this defaults to 1.0 and baseview's later Resized event will correct
+                // things via handle_window_info.
+                let initial_scale = host_scale_factor.load();
+                let physical_w = (width as f32 * initial_scale) as u32;
+                let physical_h = (height as f32 * initial_scale) as u32;
+                let adapter =
+                    BaseviewSlintAdapter::new(physical_w, physical_h, initial_scale);
 
                 // Wire up the GL proc-address loader now that the context is live.
                 adapter.set_gl_context(baseview_window);
@@ -689,6 +705,21 @@ impl<T: slint::ComponentHandle + 'static> Editor for SlintEditor<T> {
                 // Install our platform on first open; ignored (returns Err) on subsequent opens
                 // since Slint only allows setting the platform once per process.
                 let _ = slint::platform::set_platform(Box::new(BaseviewSlintPlatform));
+
+                // Push the scale factor and logical size into the Slint window BEFORE
+                // creating the component, so the very first layout pass already uses
+                // the correct scale. ScaleFactorChanged must come first; Slint converts
+                // the LogicalSize in Resized using its current internal scale_factor.
+                adapter.window.dispatch_event(
+                    slint::platform::WindowEvent::ScaleFactorChanged {
+                        scale_factor: initial_scale,
+                    },
+                );
+                adapter
+                    .window
+                    .dispatch_event(slint::platform::WindowEvent::Resized {
+                        size: slint::LogicalSize::new(width as f32, height as f32),
+                    });
 
                 let component = component_factory()
                     .unwrap_or_else(|e| panic!("Failed to create Slint component: {}", e));
@@ -718,9 +749,9 @@ impl<T: slint::ComponentHandle + 'static> Editor for SlintEditor<T> {
         self.state.size()
     }
 
-    fn set_scale_factor(&self, _factor: f32) -> bool {
-        // TODO: Implement scale factor handling for Slint
-        false
+    fn set_scale_factor(&self, factor: f32) -> bool {
+        self.host_scale_factor.store(factor);
+        true
     }
 
     fn param_values_changed(&self) {}
